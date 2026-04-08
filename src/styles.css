@@ -1,0 +1,307 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --app-bg: #0f172a;
+  --text-main: #e5e7eb;
+  --text-muted: #94a3b8;
+  --text-accent: #93c5fd;
+  --panel-bg: #111827;
+  --panel-border: #243041;
+  --badge-bg: #1e293b;
+  --badge-border: #334155;
+  --button-bg: #1e293b;
+  --button-border: #334155;
+  --card-bg: #0f172a;
+  --editor-border: rgba(148, 163, 184, 0.12);
+  --selection-bg: rgba(59, 130, 246, 0.28);
+  --cursor-color: #f8fafc;
+  --bubble-bg: #172033;
+  --bubble-shadow: 0 10px 24px rgba(15, 23, 42, 0.28);
+  color: var(--text-main);
+  background: var(--app-bg);
+}
+
+:root[data-theme='light'] {
+  --app-bg: #eef3f8;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --text-accent: #1d4ed8;
+  --panel-bg: #ffffff;
+  --panel-border: #d7e0ea;
+  --badge-bg: #f8fafc;
+  --badge-border: #cbd5e1;
+  --button-bg: #f8fafc;
+  --button-border: #cbd5e1;
+  --card-bg: #f8fafc;
+  --editor-border: rgba(148, 163, 184, 0.3);
+  --selection-bg: rgba(59, 130, 246, 0.18);
+  --cursor-color: #0f172a;
+  --bubble-bg: #ffffff;
+  --bubble-shadow: 0 10px 24px rgba(148, 163, 184, 0.22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--app-bg);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  padding: 18px;
+  min-height: 100vh;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.theme-switch {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
+}
+
+.theme-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-button.active {
+  background: var(--panel-bg);
+  color: var(--text-main);
+}
+
+.editor-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: calc(100vh - 36px);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.subtle {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px 12px;
+}
+
+.badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
+  color: var(--text-main);
+}
+
+.status {
+  min-height: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--text-accent);
+}
+
+#editor {
+  position: relative;
+  min-height: 0;
+  border-top: 1px solid var(--editor-border);
+}
+
+#editor .cm-editor {
+  height: 100%;
+}
+
+#editor .cm-scroller {
+  min-height: 100%;
+}
+
+#editor .cm-content {
+  caret-color: var(--cursor-color);
+}
+
+#editor .cm-cursor,
+#editor .cm-dropCursor {
+  border-left: 2px solid var(--cursor-color) !important;
+}
+
+#editor .cm-focused .cm-cursor {
+  border-left-color: var(--cursor-color) !important;
+}
+
+.sidebar {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.sidebar-section {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--editor-border);
+}
+
+.sidebar-section:last-child {
+  border-bottom: 0;
+}
+
+.sidebar h2 {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+}
+
+.sample-button {
+  width: 100%;
+  text-align: left;
+  background: var(--button-bg);
+  color: var(--text-main);
+  border: 1px solid var(--button-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.sample-button:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.citation-list {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.citation-card {
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.citation-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.citation-card .meta {
+  color: var(--text-accent);
+  font-size: 0.83rem;
+  margin-bottom: 8px;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.cm-editor .detected-citation {
+  background: linear-gradient(180deg, rgba(250, 204, 21, 0.12), rgba(250, 204, 21, 0.2));
+  box-shadow: inset 0 -2px 0 rgba(250, 204, 21, 0.7);
+  border-radius: 4px;
+}
+
+.cm-editor .detected-citation-resolved {
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.12), rgba(34, 197, 94, 0.22));
+  box-shadow: inset 0 -2px 0 rgba(16, 185, 129, 0.85);
+  border-radius: 4px;
+}
+
+.cm-editor .detected-citation-unresolved {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.12), rgba(248, 113, 113, 0.22));
+  box-shadow: inset 0 -2px 0 rgba(248, 113, 113, 0.85);
+  border-radius: 4px;
+}
+
+.citation-bubble {
+  position: absolute;
+  z-index: 20;
+  width: min(320px, calc(100% - 24px));
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bubble-bg);
+  border: 1px solid var(--badge-border);
+  box-shadow: var(--bubble-shadow);
+  color: var(--text-main);
+}
+
+.citation-bubble.hidden {
+  display: none;
+}
+
+.citation-bubble strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.citation-bubble .meta {
+  margin-bottom: 8px;
+  color: var(--text-accent);
+  font-size: 0.82rem;
+}
+
+.bubble-preview {
+  color: var(--text-main);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-panel {
+    min-height: 65vh;
+  }
+}
