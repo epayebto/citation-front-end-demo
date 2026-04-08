@@ -1,29 +1,53 @@
 /// <reference lib="webworker" />
 import type { ParsedCitation, WorkerRequest, WorkerResponse } from './types';
 
-const ABBREV = String.raw`[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]{1,9}`;
+const ABBREV = String.raw`(?=[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]*[A-ZÄÖÜ])[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]{1,9}`;
 const LATIN_SUFFIXES = String.raw`bis|ter|quater|quinquies|sexies|septies|octies|novies|decies`;
 const ARTNUM = String.raw`\d+(?:${LATIN_SUFFIXES}|[a-z]?)`;
 const SR_NUM = String.raw`\d{3}(?:\.\d+)*`;
 
+const ORDINALS = String.raw`erster|zweiter|dritter|vierter|fünfter|sechster|siebter|achter|neunter|zehnter`;
+const ORDINAL_TO_DIGIT: Record<string, string> = {
+  erster: '1', zweiter: '2', dritter: '3', vierter: '4', fünfter: '5',
+  sechster: '6', siebter: '7', achter: '8', neunter: '9', zehnter: '10'
+};
 const PARA = (groupPrefix: string) => String.raw`(?:\s+(?:Abs\.|al\.|cpv\.)\s*(?<${groupPrefix}_para>\d+[a-z]?))?`;
-const LETTER = (groupPrefix: string) => String.raw`(?:\s+(?:Bst\.|let\.|lett\.)\s*(?<${groupPrefix}_let>[a-z](?:bis|ter)?))?`;
+const LETTER = (groupPrefix: string) => String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*(?<${groupPrefix}_let>[a-z](?:bis|ter)?))?`;
 const NUMBER = (groupPrefix: string) => String.raw`(?:\s+(?:Ziff\.|ch\.|n\.)\s*(?<${groupPrefix}_num>\d+))?`;
-const SENTENCE = (groupPrefix: string) => String.raw`(?:\s+(?:Satz|phrase|periodo)\s*(?<${groupPrefix}_sent>\d+))?`;
+const SENTENCE = (groupPrefix: string) => String.raw`(?:\s+(?:(?<${groupPrefix}_sentord>${ORDINALS})\s+(?:Satz|phrase|periodo)|(?:Satz|phrase|periodo)\s*(?<${groupPrefix}_sent>\d+)))?`;
 
 function subArticle(groupPrefix: string): string {
   return `${PARA(groupPrefix)}${LETTER(groupPrefix)}${NUMBER(groupPrefix)}${SENTENCE(groupPrefix)}`;
 }
 
+const SUB_PLAIN = String.raw`(?:\s+(?:Abs\.|al\.|cpv\.)\s*\d+[a-z]?)?` +
+  String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*[a-z](?:bis|ter)?)?` +
+  String.raw`(?:\s+(?:Ziff\.|ch\.|n\.)\s*\d+)?` +
+  String.raw`(?:\s+(?:(?:${ORDINALS})\s+)?(?:Satz|phrase|periodo)\s*\d*)?`;
+
 const citationPattern = new RegExp(
   String.raw`(?:` +
-    String.raw`(?<abbrev_a>${ABBREV})\s+[Aa]rt\.?\s*(?<num_a>${ARTNUM})${subArticle('a')}` +
+    String.raw`\b(?<abbrev_a>${ABBREV})\s+[Aa]rt\.?\s*(?<num_a>${ARTNUM})${subArticle('a')}` +
   String.raw`)` +
   String.raw`|(?:` +
-    String.raw`[Aa]rt\.?\s*(?<num_b>${ARTNUM})${subArticle('b')}\s+(?<abbrev_b>${ABBREV})` +
+    String.raw`[Aa]rt\.?\s*(?<num_b>${ARTNUM})${subArticle('b')}\s+(?<abbrev_b>${ABBREV})\b` +
   String.raw`)`,
   'g'
 );
+
+const compoundPattern = new RegExp(
+  String.raw`[Aa]rt\.?\s*${ARTNUM}${SUB_PLAIN}` +
+  String.raw`(?:\s+(?:et|und|e)\s+(?:[Aa]rt\.?\s*)?${ARTNUM}${SUB_PLAIN})+` +
+  String.raw`\s+(?:${ABBREV})\b`,
+  'g'
+);
+
+const compoundArticlePattern = new RegExp(
+  String.raw`(?:[Aa]rt\.?\s*)?(?<artnum>${ARTNUM})(?<sub>${SUB_PLAIN})`,
+  'g'
+);
+
+const compoundAbbrevPattern = new RegExp(String.raw`(?<abbr>${ABBREV})\s*$`);
 
 const srPattern = new RegExp(
   String.raw`(?:SR|RS)\s+(?<sr>${SR_NUM})(?:\s+[Aa]rt\.?\s*(?<sr_artnum>${ARTNUM})${subArticle('sr')})?`,
@@ -35,12 +59,59 @@ let latestText = '';
 let latestCitations: ParsedCitation[] = [];
 
 function extractSubArticle(groups: Record<string, string | undefined>, prefix: string) {
+  const sentOrd = groups[`${prefix}_sentord`];
   return {
     paragraph: groups[`${prefix}_para`],
     letter: groups[`${prefix}_let`],
     number: groups[`${prefix}_num`],
-    sentence: groups[`${prefix}_sent`]
+    sentence: groups[`${prefix}_sent`] ?? (sentOrd ? ORDINAL_TO_DIGIT[sentOrd] : undefined)
   };
+}
+
+function parseCompoundCitations(text: string, seen: Set<string>): ParsedCitation[] {
+  const results: ParsedCitation[] = [];
+
+  for (const match of text.matchAll(compoundPattern)) {
+    if (typeof match.index !== 'number') continue;
+
+    const span = match[0];
+    const abbrMatch = compoundAbbrevPattern.exec(span);
+    if (!abbrMatch?.groups?.abbr) continue;
+    const abbreviation = abbrMatch.groups.abbr;
+
+    const articlesText = span.slice(0, abbrMatch.index).trim();
+
+    for (const artMatch of articlesText.matchAll(compoundArticlePattern)) {
+      const articleNumber = artMatch.groups?.artnum?.trim();
+      if (!articleNumber || typeof artMatch.index !== 'number') continue;
+
+      const subText = (artMatch.groups?.sub ?? '').trim();
+      const paraMatch = subText.match(/(?:Abs\.|al\.|cpv\.)\s*(\d+[a-z]?)/);
+      const letMatch = subText.match(/(?:Bst\.|let\.|lett\.|lit\.)\s*([a-z](?:bis|ter)?)/);
+      const numMatch = subText.match(/(?:Ziff\.|ch\.|n\.)\s*(\d+)/);
+      const sentMatch = subText.match(/(?:Satz|phrase|periodo)\s*(\d+)/);
+      const sentOrdMatch = subText.match(new RegExp(`(${ORDINALS})\\s+(?:Satz|phrase|periodo)`));
+
+      const key = `${abbreviation.toUpperCase()}|${articleNumber.toLowerCase()}|${match.index + artMatch.index}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      results.push({
+        id: `${abbreviation.toUpperCase()}-${articleNumber}-${match.index + artMatch.index}`,
+        abbreviation,
+        articleNumber,
+        rawSpan: `Art. ${articleNumber} ${abbreviation}`,
+        start: match.index,
+        end: match.index + span.length,
+        paragraph: paraMatch?.[1],
+        letter: letMatch?.[1],
+        number: numMatch?.[1],
+        sentence: sentMatch?.[1] ?? (sentOrdMatch?.[1] ? ORDINAL_TO_DIGIT[sentOrdMatch[1]] : undefined)
+      });
+    }
+  }
+
+  return results;
 }
 
 function parse(text: string): ParsedCitation[] {
@@ -102,6 +173,8 @@ function parse(text: string): ParsedCitation[] {
         : { paragraph: undefined, letter: undefined, number: undefined, sentence: undefined })
     });
   }
+
+  results.push(...parseCompoundCitations(text, seen));
 
   return results.sort((left, right) => left.start - right.start);
 }

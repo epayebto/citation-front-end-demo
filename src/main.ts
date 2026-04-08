@@ -1,7 +1,7 @@
 import './styles.css';
 import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
-import { SAMPLE_TEXT } from './sampleText';
+import { SAMPLE_TEXT, judgmentSample } from './sampleText';
 import { resolveCitation } from './apiResolver';
 import type { ParsedCitation, ResolvedCitation, WorkerRequest, WorkerResponse } from './types';
 
@@ -61,35 +61,18 @@ app.innerHTML = `
   </div>
 `;
 
-const editorContainer = document.querySelector<HTMLDivElement>('#editor');
-const citationsCount = document.querySelector<HTMLSpanElement>('#citations-count');
-const workerLatency = document.querySelector<HTMLSpanElement>('#worker-latency');
-const resolverState = document.querySelector<HTMLSpanElement>('#resolver-state');
-const inputLatency = document.querySelector<HTMLSpanElement>('#input-latency');
-const decorateLatency = document.querySelector<HTMLSpanElement>('#decorate-latency');
-const frameJank = document.querySelector<HTMLSpanElement>('#frame-jank');
-const statusText = document.querySelector<HTMLDivElement>('#status-text');
-const citationList = document.querySelector<HTMLDivElement>('#citation-list');
-const citationBubble = document.querySelector<HTMLDivElement>('#citation-bubble');
-const themeDarkButton = document.querySelector<HTMLButtonElement>('#theme-dark');
-const themeLightButton = document.querySelector<HTMLButtonElement>('#theme-light');
-
-if (
-  !editorContainer ||
-  !citationsCount ||
-  !workerLatency ||
-  !resolverState ||
-  !inputLatency ||
-  !decorateLatency ||
-  !frameJank ||
-  !statusText ||
-  !citationList ||
-  !citationBubble ||
-  !themeDarkButton ||
-  !themeLightButton
-) {
-  throw new Error('One or more UI elements are missing.');
-}
+const editorContainer = document.querySelector<HTMLDivElement>('#editor')!;
+const citationsCount = document.querySelector<HTMLSpanElement>('#citations-count')!;
+const workerLatency = document.querySelector<HTMLSpanElement>('#worker-latency')!;
+const resolverState = document.querySelector<HTMLSpanElement>('#resolver-state')!;
+const inputLatency = document.querySelector<HTMLSpanElement>('#input-latency')!;
+const decorateLatency = document.querySelector<HTMLSpanElement>('#decorate-latency')!;
+const frameJank = document.querySelector<HTMLSpanElement>('#frame-jank')!;
+const statusText = document.querySelector<HTMLDivElement>('#status-text')!;
+const citationList = document.querySelector<HTMLDivElement>('#citation-list')!;
+const citationBubble = document.querySelector<HTMLDivElement>('#citation-bubble')!;
+const themeDarkButton = document.querySelector<HTMLButtonElement>('#theme-dark')!;
+const themeLightButton = document.querySelector<HTMLButtonElement>('#theme-light')!;
 
 const worker = new Worker(new URL('./citationWorker.ts', import.meta.url), { type: 'module' });
 const PARSE_DEBOUNCE_MS = 90;
@@ -143,8 +126,6 @@ const pendingResolutions = new Map<string, Promise<ResolvedCitation>>();
 
 type ThemeName = 'dark' | 'light';
 
-const judgmentSample = `Nach Auffassung des Gerichts ergibt sich aus Art. 28 ZGB ein Anspruch auf Schutz der Persönlichkeit. Gleichzeitig ist Art. 41 OR für die deliktische Haftung relevant. Das Bundesgericht bleibt gemäss Art. 190 Abs. 2 LTF an das Bundesrecht gebunden.`;
-
 function applyTheme(theme: ThemeName) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem('citation-demo-theme', theme);
@@ -180,7 +161,7 @@ function renderSidebar(citation: ParsedCitation, resolved?: ResolvedCitation) {
       <div class="citation-card">
         <strong>${escapeHtml(payload.language.toUpperCase())} · ${escapeHtml(payload.articleLabel)}</strong>
         <div class="meta">${escapeHtml(payload.title)} · SR ${escapeHtml(resolved.srNumber ?? '')}</div>
-        <div>${payload.html}</div>
+        <div>${escapeHtml(payload.html.replace(/<[^>]+>/g, ''))}</div>
       </div>
     `)
     .join('');
@@ -250,15 +231,6 @@ function updateDecorations() {
   const startedAt = performance.now();
   editor.dispatch({
     effects: setCitationDecorations.of(buildDecorations())
-  });
-  lastDecorationMs = performance.now() - startedAt;
-  decorateLatency.textContent = `decorate: ${lastDecorationMs.toFixed(1)} ms`;
-}
-
-function clearDecorations() {
-  const startedAt = performance.now();
-  editor.dispatch({
-    effects: setCitationDecorations.of([])
   });
   lastDecorationMs = performance.now() - startedAt;
   decorateLatency.textContent = `decorate: ${lastDecorationMs.toFixed(1)} ms`;

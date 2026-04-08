@@ -64,6 +64,7 @@ export async function resolveCitation(citation: ParsedCitation): Promise<Resolve
 
   const promise = fetch(RESOLVE_ENDPOINT, {
     method: 'POST',
+    signal: AbortSignal.timeout(5000),
     headers: {
       'Content-Type': 'application/json'
     },
@@ -106,15 +107,18 @@ export async function resolveCitation(citation: ParsedCitation): Promise<Resolve
         reason: result.reason
       } satisfies ResolvedCitation;
     })
-    .catch((error: unknown) => ({
-      citationId: citation.id,
-      canonicalKey: cacheKey,
-      resolved: false,
-      displayLabel: citation.rawSpan,
-      reason: error instanceof Error
-        ? `${error.message}. Check API availability/CORS for ${API_BASE_URL}.`
-        : `Resolver request failed. Check API availability/CORS for ${API_BASE_URL}.`
-    }));
+    .catch((error: unknown) => {
+      cache.delete(cacheKey);
+      return {
+        citationId: citation.id,
+        canonicalKey: cacheKey,
+        resolved: false,
+        displayLabel: citation.rawSpan,
+        reason: error instanceof Error
+          ? `${error.message}. Check API availability/CORS for ${API_BASE_URL}.`
+          : `Resolver request failed. Check API availability/CORS for ${API_BASE_URL}.`
+      };
+    });
 
   cache.set(cacheKey, promise);
   return promise;
