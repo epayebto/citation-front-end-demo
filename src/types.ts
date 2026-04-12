@@ -29,12 +29,33 @@ export interface WorkerResponse {
   durationMs: number;
 }
 
+export interface SubArticleFocus {
+  eid: string;
+  chapeau?: string;
+  text: string;
+}
+
+export interface SubArticle {
+  eid: string;
+  type: 'paragraph' | 'item';
+  num?: string;
+  label?: string;
+  chapeau?: string;
+  text: string;
+  items: SubArticle[];
+}
+
 export interface ArticlePreviewPayload {
   language: string;
   title: string;
   articleLabel: string;
-  html: string;
+  articleTitle?: string;
+  hierarchyLabel?: string;
+  excerpt: string;
+  fullText: string;
   sourceUrl: string;
+  subArticles: SubArticle[];
+  focus?: SubArticleFocus;
 }
 
 export interface ResolvedCitation {

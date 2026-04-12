@@ -133,6 +133,21 @@ function applyTheme(theme: ThemeName) {
   themeLightButton?.classList.toggle('active', theme === 'light');
 }
 
+function renderPayloadContent(payload: import('./types').ArticlePreviewPayload): string {
+  // If the API returned a focus (sub-article match), show that with context
+  if (payload.focus) {
+    const parts: string[] = [];
+    if (payload.focus.chapeau) {
+      parts.push(`<div class="focus-chapeau">${escapeHtml(payload.focus.chapeau)}</div>`);
+    }
+    parts.push(`<div class="focus-text">${escapeHtml(payload.focus.text)}</div>`);
+    return parts.join('');
+  }
+
+  // Fallback: show excerpt or full text
+  return `<div>${escapeHtml(payload.excerpt || payload.fullText || 'No article text returned.')}</div>`;
+}
+
 function renderSidebar(citation: ParsedCitation, resolved?: ResolvedCitation) {
   if (!resolved) {
     citationList.innerHTML = `
@@ -157,13 +172,23 @@ function renderSidebar(citation: ParsedCitation, resolved?: ResolvedCitation) {
   }
 
   const languages = Object.values(resolved.payloads)
-    .map((payload) => `
-      <div class="citation-card">
-        <strong>${escapeHtml(payload.language.toUpperCase())} · ${escapeHtml(payload.articleLabel)}</strong>
-        <div class="meta">${escapeHtml(payload.title)} · SR ${escapeHtml(resolved.srNumber ?? '')}</div>
-        <div>${escapeHtml(payload.html.replace(/<[^>]+>/g, ''))}</div>
-      </div>
-    `)
+    .map((payload) => {
+      const breadcrumb = payload.hierarchyLabel
+        ? `<div class="hierarchy">${escapeHtml(payload.hierarchyLabel)}</div>`
+        : '';
+      const sourceLink = payload.sourceUrl
+        ? `<a class="source-link" href="${escapeHtml(payload.sourceUrl)}" target="_blank" rel="noopener">Fedlex</a>`
+        : '';
+
+      return `
+        <div class="citation-card">
+          <strong>${escapeHtml(payload.language.toUpperCase())} · ${escapeHtml(payload.articleLabel)}</strong>
+          ${breadcrumb}
+          <div class="meta">${escapeHtml(payload.title)} · SR ${escapeHtml(resolved.srNumber ?? '')} ${sourceLink}</div>
+          ${renderPayloadContent(payload)}
+        </div>
+      `;
+    })
     .join('');
 
   citationList.innerHTML = languages;
@@ -187,7 +212,8 @@ function renderBubble(citation: ParsedCitation, resolved?: ResolvedCitation) {
   }
 
   const preferred = resolved.payloads.fr ?? resolved.payloads.de ?? Object.values(resolved.payloads)[0];
-  const previewText = preferred.html.replace(/<[^>]+>/g, '').trim();
+  // Show focused text if available, otherwise excerpt
+  const previewText = preferred.focus?.text ?? preferred.excerpt ?? preferred.fullText ?? '';
 
   return `
     <strong>${escapeHtml(citation.rawSpan)}</strong>

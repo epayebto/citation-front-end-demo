@@ -1,71 +1,172 @@
 /// <reference lib="webworker" />
 import type { ParsedCitation, WorkerRequest, WorkerResponse } from './types';
 
-const ABBREV = String.raw`(?=[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]*[A-ZÄÖÜ])[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]{1,9}`;
+// ---------------------------------------------------------------------------
+// Building blocks
+// ---------------------------------------------------------------------------
+
+// Abbreviations must contain at least 2 uppercase letters (rejects "Gemäss", "Dieser", etc.)
+// Optionally followed by /XX cantonal suffix (e.g. KV/ZH, StPO/FR)
+const ABBREV = String.raw`(?=[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]*[A-ZÄÖÜ])[A-ZÄÖÜ][A-Za-zÄÖÜäöü0-9]{1,9}(?:/[A-Z]{2})?`;
+
 const LATIN_SUFFIXES = String.raw`bis|ter|quater|quinquies|sexies|septies|octies|novies|decies`;
 const ARTNUM = String.raw`\d+(?:${LATIN_SUFFIXES}|[a-z]?)`;
 const SR_NUM = String.raw`\d{3}(?:\.\d+)*`;
 
-const ORDINALS = String.raw`erster|zweiter|dritter|vierter|fünfter|sechster|siebter|achter|neunter|zehnter`;
+// Article keyword: Art. / § / sec. / Section
+const ART_KW = String.raw`(?:[Aa]rt\.?|§|[Ss]ec(?:tion)?\.?)`;
+
+// ---------------------------------------------------------------------------
+// DE ordinal words  →  digit mapping
+// ---------------------------------------------------------------------------
+const DE_ORDINALS = String.raw`erster|zweiter|dritter|vierter|fünfter|sechster|siebter|achter|neunter|zehnter`;
 const ORDINAL_TO_DIGIT: Record<string, string> = {
   erster: '1', zweiter: '2', dritter: '3', vierter: '4', fünfter: '5',
   sechster: '6', siebter: '7', achter: '8', neunter: '9', zehnter: '10'
 };
-const PARA = (groupPrefix: string) => String.raw`(?:\s+(?:Abs\.|al\.|cpv\.)\s*(?<${groupPrefix}_para>\d+[a-z]?))?`;
-const LETTER = (groupPrefix: string) => String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*(?<${groupPrefix}_let>[a-z](?:bis|ter)?))?`;
-const NUMBER = (groupPrefix: string) => String.raw`(?:\s+(?:Ziff\.|ch\.|n\.)\s*(?<${groupPrefix}_num>\d+))?`;
-const SENTENCE = (groupPrefix: string) => String.raw`(?:\s+(?:(?<${groupPrefix}_sentord>${ORDINALS})\s+(?:Satz|phrase|periodo)|(?:Satz|phrase|periodo)\s*(?<${groupPrefix}_sent>\d+)))?`;
 
+// ---------------------------------------------------------------------------
+// Sub-article component patterns (named-group version for main regex)
+//
+// Sources:
+//   DE  – BGer Zitierregeln:  Abs. / Bst. / lit. / Ziff. / Nr. / Satz
+//   FR  – Règles de citation: al. / let. / ch. / phrase  (ordinal: 1re, 2e …)
+//   IT  – Regole di citazione: cpv. / lett. / n. / periodo / frase (ordinal: 1o, 2a …)
+//   EN  – para. / par. / let. / lit. / no. / sentence
+// ---------------------------------------------------------------------------
+
+// Paragraph:  Abs. (DE) | al. (FR) | cpv. (IT) | par./para. (EU/EN)
+const PARA = (g: string) =>
+  String.raw`(?:\s+(?:Abs\.|al\.|cpv\.|par(?:a)?\.)\s*(?<${g}_para>\d+[a-z]?))?`;
+
+// Letter:  Bst./lit. (DE) | let./lett. (FR/IT) | lit. (EN)
+const LETTER = (g: string) =>
+  String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*(?<${g}_let>[a-z](?:bis|ter)?))?`;
+
+// Number:  Ziff./Nr. (DE) | ch. (FR) | n. (IT) | no. (EN)
+// Accepts digits or lowercase Roman numerals (i, ii, iii, iv, etc.)
+const ROMAN = String.raw`[ivxlcdm]+`;
+const NUMBER = (g: string) =>
+  String.raw`(?:\s+(?:Ziff\.|Nr\.|ch\.|n\.|no\.)\s*(?<${g}_num>\d+|${ROMAN}))?`;
+
+// Sentence — three sub-patterns:
+//   1) DE ordinal word + keyword:       "zweiter Satz"
+//   2) keyword + cardinal:              "Satz 2" / "sentence 3"
+//   3) FR/IT/EN numeric ordinal + kw:   "2e phrase" / "2a frase" / "2nd sentence"
+const SENT_KW = String.raw`Satz|phrase|periodo|frase|sentence`;
+const NUM_ORD_SUFFIX = String.raw`(?:re|e|a|o|st|nd|rd|th)`;
+const SENTENCE = (g: string) =>
+  String.raw`(?:` +
+    // optional leading comma (FR style: "art. 40, 1re phrase, LAA")
+    String.raw`(?:,?\s+)` +
+    String.raw`(?:` +
+      // 1) DE ordinal word:  "zweiter Satz"
+      String.raw`(?<${g}_sentord>${DE_ORDINALS})\s+(?:${SENT_KW})` +
+      String.raw`|` +
+      // 2) keyword + cardinal:  "Satz 2"
+      String.raw`(?:${SENT_KW})\s*(?<${g}_sent>\d+)` +
+      String.raw`|` +
+      // 3) numeric ordinal:  "2e phrase" / "2a frase" / "2nd sentence"
+      String.raw`(?<${g}_sentnum>\d+)${NUM_ORD_SUFFIX}\s+(?:${SENT_KW})` +
+    String.raw`)` +
+  String.raw`)?`;
+
+// Following:  f./ff. (DE) | s./ss (FR) | seg./segg. (IT)
+const FOLLOWING = String.raw`(?:\s+(?:ff?\.|ss?|segg?\.))?`;
+
+// Order: para → letter → number → letter (again, for IT n.+lett.) → sentence → following
 function subArticle(groupPrefix: string): string {
-  return `${PARA(groupPrefix)}${LETTER(groupPrefix)}${NUMBER(groupPrefix)}${SENTENCE(groupPrefix)}`;
+  // Second letter group uses _let2 to avoid duplicate named group
+  const LETTER2 = String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*(?<${groupPrefix}_let2>[a-z](?:bis|ter)?))?`;
+  return `${PARA(groupPrefix)}${LETTER(groupPrefix)}${NUMBER(groupPrefix)}${LETTER2}${SENTENCE(groupPrefix)}${FOLLOWING}`;
 }
 
-const SUB_PLAIN = String.raw`(?:\s+(?:Abs\.|al\.|cpv\.)\s*\d+[a-z]?)?` +
-  String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*[a-z](?:bis|ter)?)?` +
-  String.raw`(?:\s+(?:Ziff\.|ch\.|n\.)\s*\d+)?` +
-  String.raw`(?:\s+(?:(?:${ORDINALS})\s+)?(?:Satz|phrase|periodo)\s*\d*)?`;
+// ---------------------------------------------------------------------------
+// Plain (non-capturing) sub-article pattern for compound regex
+// ---------------------------------------------------------------------------
+const LETTER_PLAIN = String.raw`(?:\s+(?:Bst\.|let\.|lett\.|lit\.)\s*[a-z](?:bis|ter)?)?`;
+const SUB_PLAIN =
+  String.raw`(?:\s+(?:Abs\.|al\.|cpv\.|par(?:a)?\.)\s*\d+[a-z]?)?` +
+  LETTER_PLAIN +
+  String.raw`(?:\s+(?:Ziff\.|Nr\.|ch\.|n\.|no\.)\s*(?:\d+|${ROMAN}))?` +
+  LETTER_PLAIN +
+  String.raw`(?:(?:,?\s+)(?:(?:${DE_ORDINALS})\s+(?:${SENT_KW})|(?:${SENT_KW})\s*\d*|\d+${NUM_ORD_SUFFIX}\s+(?:${SENT_KW})))?` +
+  String.raw`(?:\s+(?:ff?\.|ss?|segg?\.))?`;
 
+// ---------------------------------------------------------------------------
+// Main citation patterns
+// ---------------------------------------------------------------------------
+
+// Format A:  ABBREV Art. NUM [sub]          e.g. "ZGB Art. 28 Abs. 2"
+// Format B:  Art. NUM [sub] ABBREV          e.g. "Art. 28 Abs. 2 ZGB"
 const citationPattern = new RegExp(
   String.raw`(?:` +
-    String.raw`\b(?<abbrev_a>${ABBREV})\s+[Aa]rt\.?\s*(?<num_a>${ARTNUM})${subArticle('a')}` +
+    String.raw`\b(?<abbrev_a>${ABBREV})\s+${ART_KW}\s*(?<num_a>${ARTNUM})${subArticle('a')}` +
   String.raw`)` +
   String.raw`|(?:` +
-    String.raw`[Aa]rt\.?\s*(?<num_b>${ARTNUM})${subArticle('b')}\s+(?<abbrev_b>${ABBREV})\b` +
+    String.raw`${ART_KW}\s*(?<num_b>${ARTNUM})${subArticle('b')}[,;]?\s+(?<abbrev_b>${ABBREV})\b` +
   String.raw`)`,
   'g'
 );
 
+// Compound:  Art. X [sub] et/und/and/e [Art.] Y [sub] ABBREV
 const compoundPattern = new RegExp(
-  String.raw`[Aa]rt\.?\s*${ARTNUM}${SUB_PLAIN}` +
-  String.raw`(?:\s+(?:et|und|e)\s+(?:[Aa]rt\.?\s*)?${ARTNUM}${SUB_PLAIN})+` +
-  String.raw`\s+(?:${ABBREV})\b`,
+  String.raw`${ART_KW}\s*${ARTNUM}${SUB_PLAIN}` +
+  String.raw`(?:\s+(?:et|und|e|and)\s+(?:${ART_KW}\s*)?${ARTNUM}${SUB_PLAIN})+` +
+  String.raw`[,;]?\s+(?:${ABBREV})\b`,
   'g'
 );
 
 const compoundArticlePattern = new RegExp(
-  String.raw`(?:[Aa]rt\.?\s*)?(?<artnum>${ARTNUM})(?<sub>${SUB_PLAIN})`,
+  String.raw`(?:${ART_KW}\s*)?(?<artnum>${ARTNUM})(?<sub>${SUB_PLAIN})`,
   'g'
 );
 
 const compoundAbbrevPattern = new RegExp(String.raw`(?<abbr>${ABBREV})\s*$`);
 
+// SR/RS pattern
 const srPattern = new RegExp(
-  String.raw`(?:SR|RS)\s+(?<sr>${SR_NUM})(?:\s+[Aa]rt\.?\s*(?<sr_artnum>${ARTNUM})${subArticle('sr')})?`,
+  String.raw`(?:SR|RS)\s+(?<sr>${SR_NUM})(?:\s+${ART_KW}\s*(?<sr_artnum>${ARTNUM})${subArticle('sr')})?`,
   'g'
 );
+
 const REPARSE_CONTEXT_CHARS = 96;
 
 let latestText = '';
 let latestCitations: ParsedCitation[] = [];
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function extractSubArticle(groups: Record<string, string | undefined>, prefix: string) {
   const sentOrd = groups[`${prefix}_sentord`];
+  const sentNum = groups[`${prefix}_sentnum`];
   return {
     paragraph: groups[`${prefix}_para`],
-    letter: groups[`${prefix}_let`],
+    letter: groups[`${prefix}_let`] ?? groups[`${prefix}_let2`],
     number: groups[`${prefix}_num`],
-    sentence: groups[`${prefix}_sent`] ?? (sentOrd ? ORDINAL_TO_DIGIT[sentOrd] : undefined)
+    sentence: groups[`${prefix}_sent`]
+      ?? (sentOrd ? ORDINAL_TO_DIGIT[sentOrd] : undefined)
+      ?? sentNum
   };
+}
+
+/** Extract sentence number from plain (non-capturing) sub-article text */
+function extractSentenceFromPlain(subText: string): string | undefined {
+  // keyword + cardinal: "Satz 2"
+  const cardinalMatch = subText.match(new RegExp(`(?:${SENT_KW})\\s*(\\d+)`));
+  if (cardinalMatch?.[1]) return cardinalMatch[1];
+
+  // numeric ordinal: "2e phrase", "1re phrase", "2a frase"
+  const numOrdMatch = subText.match(new RegExp(`(\\d+)(?:${NUM_ORD_SUFFIX.slice(2, -1)})\\s+(?:${SENT_KW})`));
+  if (numOrdMatch?.[1]) return numOrdMatch[1];
+
+  // DE ordinal word: "zweiter Satz"
+  const deOrdMatch = subText.match(new RegExp(`(${DE_ORDINALS})\\s+(?:${SENT_KW})`));
+  if (deOrdMatch?.[1]) return ORDINAL_TO_DIGIT[deOrdMatch[1]];
+
+  return undefined;
 }
 
 function parseCompoundCitations(text: string, seen: Set<string>): ParsedCitation[] {
@@ -86,11 +187,9 @@ function parseCompoundCitations(text: string, seen: Set<string>): ParsedCitation
       if (!articleNumber || typeof artMatch.index !== 'number') continue;
 
       const subText = (artMatch.groups?.sub ?? '').trim();
-      const paraMatch = subText.match(/(?:Abs\.|al\.|cpv\.)\s*(\d+[a-z]?)/);
+      const paraMatch = subText.match(/(?:Abs\.|al\.|cpv\.|par(?:a)?\.)\s*(\d+[a-z]?)/);
       const letMatch = subText.match(/(?:Bst\.|let\.|lett\.|lit\.)\s*([a-z](?:bis|ter)?)/);
-      const numMatch = subText.match(/(?:Ziff\.|ch\.|n\.)\s*(\d+)/);
-      const sentMatch = subText.match(/(?:Satz|phrase|periodo)\s*(\d+)/);
-      const sentOrdMatch = subText.match(new RegExp(`(${ORDINALS})\\s+(?:Satz|phrase|periodo)`));
+      const numMatch = subText.match(/(?:Ziff\.|Nr\.|ch\.|n\.|no\.)\s*(\d+)/);
 
       const key = `${abbreviation.toUpperCase()}|${articleNumber.toLowerCase()}|${match.index + artMatch.index}`;
       if (seen.has(key)) continue;
@@ -106,13 +205,17 @@ function parseCompoundCitations(text: string, seen: Set<string>): ParsedCitation
         paragraph: paraMatch?.[1],
         letter: letMatch?.[1],
         number: numMatch?.[1],
-        sentence: sentMatch?.[1] ?? (sentOrdMatch?.[1] ? ORDINAL_TO_DIGIT[sentOrdMatch[1]] : undefined)
+        sentence: extractSentenceFromPlain(subText)
       });
     }
   }
 
   return results;
 }
+
+// ---------------------------------------------------------------------------
+// Main parse
+// ---------------------------------------------------------------------------
 
 function parse(text: string): ParsedCitation[] {
   const results: ParsedCitation[] = [];
@@ -178,6 +281,10 @@ function parse(text: string): ParsedCitation[] {
 
   return results.sort((left, right) => left.start - right.start);
 }
+
+// ---------------------------------------------------------------------------
+// Incremental parsing
+// ---------------------------------------------------------------------------
 
 function shiftCitation(citation: ParsedCitation, delta: number): ParsedCitation {
   return {
@@ -257,6 +364,10 @@ function incrementalParse(text: string, changes: NonNullable<WorkerRequest['chan
 
   return [...before, ...reparsed, ...after];
 }
+
+// ---------------------------------------------------------------------------
+// Worker entry point
+// ---------------------------------------------------------------------------
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const startedAt = performance.now();

@@ -17,19 +17,19 @@ const articleDatabase: Record<string, { title: string; de: string; fr: string; i
   '220|41': {
     title: 'Code of Obligations',
     de: 'Wer einem andern widerrechtlich Schaden zufügt, sei es mit Absicht, sei es aus Fahrlässigkeit, wird ihm zum Ersatze verpflichtet.',
-    fr: 'Celui qui cause, d’une manière illicite, un dommage à autrui, soit intentionnellement, soit par négligence, est tenu de le réparer.',
+    fr: 'Celui qui cause, d\u2019une manière illicite, un dommage à autrui, soit intentionnellement, soit par négligence, est tenu de le réparer.',
     it: 'Chiunque cagiona illecitamente ad altri un danno, sia con intenzione sia per negligenza, è tenuto a risarcirlo.'
   },
   '220|100bis': {
     title: 'Code of Obligations',
     de: 'Beispielhafter Demo-Text für Art. 100bis OR.',
-    fr: 'Texte de démonstration pour l’art. 100bis CO.',
-    it: 'Testo dimostrativo per l’art. 100bis CO.'
+    fr: 'Texte de démonstration pour l\u2019art. 100bis CO.',
+    it: 'Testo dimostrativo per l\u2019art. 100bis CO.'
   },
   '173.110|190': {
     title: 'Federal Supreme Court Act',
     de: 'Bundesgesetze und Völkerrecht sind für das Bundesgericht und die anderen rechtsanwendenden Behörden massgebend.',
-    fr: 'Le Tribunal fédéral et les autres autorités sont tenus d’appliquer les lois fédérales et le droit international.',
+    fr: 'Le Tribunal fédéral et les autres autorités sont tenus d\u2019appliquer les lois fédérales et le droit international.',
     it: 'Il Tribunale federale e le altre autorità applicano le leggi federali e il diritto internazionale.'
   }
 };
@@ -83,6 +83,17 @@ export function resolveCitation(citation: ParsedCitation): Promise<ResolvedCitat
         return;
       }
 
+      const makePayload = (lang: 'de' | 'fr' | 'it') => ({
+        language: lang,
+        title: record.title,
+        articleLabel: `Art. ${citation.articleNumber}`,
+        excerpt: record[lang],
+        fullText: record[lang],
+        sourceUrl: `https://www.fedlex.admin.ch/eli/cc/${lawRecord.srNumber}`,
+        subArticles: [],
+        focus: undefined
+      });
+
       resolve({
         citationId: citation.id,
         canonicalKey: cacheKey,
@@ -91,27 +102,9 @@ export function resolveCitation(citation: ParsedCitation): Promise<ResolvedCitat
         srNumber: lawRecord.srNumber,
         lawTitle: record.title,
         payloads: {
-          de: {
-            language: 'de',
-            title: record.title,
-            articleLabel: `Art. ${citation.articleNumber}`,
-            html: `<p>${record.de}</p>`,
-            sourceUrl: `https://www.fedlex.admin.ch/eli/cc/${lawRecord.srNumber}`
-          },
-          fr: {
-            language: 'fr',
-            title: record.title,
-            articleLabel: `Art. ${citation.articleNumber}`,
-            html: `<p>${record.fr}</p>`,
-            sourceUrl: `https://www.fedlex.admin.ch/eli/cc/${lawRecord.srNumber}`
-          },
-          it: {
-            language: 'it',
-            title: record.title,
-            articleLabel: `Art. ${citation.articleNumber}`,
-            html: `<p>${record.it}</p>`,
-            sourceUrl: `https://www.fedlex.admin.ch/eli/cc/${lawRecord.srNumber}`
-          }
+          de: makePayload('de'),
+          fr: makePayload('fr'),
+          it: makePayload('it')
         }
       });
     }, 120);

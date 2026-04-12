@@ -240,6 +240,34 @@ body {
   margin-bottom: 8px;
 }
 
+.citation-card .hierarchy {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+}
+
+.citation-card .source-link {
+  color: var(--text-accent);
+  text-decoration: none;
+  font-size: 0.78rem;
+}
+
+.citation-card .source-link:hover {
+  text-decoration: underline;
+}
+
+.citation-card .focus-chapeau {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+
+.citation-card .focus-text {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .empty-state {
   color: var(--text-muted);
   font-size: 0.92rem;

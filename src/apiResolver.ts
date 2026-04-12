@@ -1,15 +1,39 @@
-import type { ArticlePreviewPayload, ParsedCitation, ResolvedCitation } from './types';
+import type { ArticlePreviewPayload, ParsedCitation, ResolvedCitation, SubArticle, SubArticleFocus } from './types';
 
 const API_BASE_URL = (globalThis as { __LAW_API_BASE_URL__?: string }).__LAW_API_BASE_URL__ ?? 'http://localhost:8000';
 const RESOLVE_ENDPOINT = `${API_BASE_URL.replace(/\/$/, '')}/api/v1/citations/resolve`;
 
-type ApiCitationPayload = {
+// ---------------------------------------------------------------------------
+// API response types (match the backend contract)
+// ---------------------------------------------------------------------------
+
+type ApiSubArticle = {
+  eid: string;
+  type: 'paragraph' | 'item';
+  num?: string;
+  label?: string;
+  chapeau?: string;
+  text: string;
+  items?: ApiSubArticle[];
+};
+
+type ApiFocus = {
+  eid: string;
+  chapeau?: string;
+  text: string;
+};
+
+type ApiPayload = {
+  language?: string;
+  law_title?: string;
+  article_number?: string;
+  article_title?: string;
+  hierarchy_label?: string;
   excerpt?: string;
   full_text?: string;
   fedlex_url?: string;
-  law_title?: string;
-  article_number?: string;
-  language?: string;
+  sub_articles?: ApiSubArticle[];
+  focus?: ApiFocus;
 };
 
 type ApiCitationResult = {
@@ -19,7 +43,7 @@ type ApiCitationResult = {
   resolved: boolean;
   sr_number?: string;
   law_title?: string;
-  payloads?: Record<string, ApiCitationPayload>;
+  payloads?: Record<string, ApiPayload>;
   reason?: string;
 };
 
@@ -27,53 +51,92 @@ type ApiResolveResponse = {
   citations?: ApiCitationResult[];
 };
 
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
 const cache = new Map<string, Promise<ResolvedCitation>>();
 
 function buildCanonicalKey(citation: ParsedCitation): string {
-  if (citation.srNumber) {
-    return `${citation.srNumber}|${citation.articleNumber || '*'}`;
-  }
-  return `${citation.abbreviation.toUpperCase()}|${citation.articleNumber.toLowerCase()}`;
+  const base = citation.srNumber
+    ? `${citation.srNumber}|${citation.articleNumber || '*'}`
+    : `${citation.abbreviation.toUpperCase()}|${citation.articleNumber.toLowerCase()}`;
+
+  // Include sub-article in key so different sub-references resolve separately
+  const sub = [citation.paragraph, citation.letter, citation.number, citation.sentence]
+    .filter(Boolean)
+    .join('+');
+
+  return sub ? `${base}|${sub}` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Response mapping
+// ---------------------------------------------------------------------------
+
+function mapSubArticles(items?: ApiSubArticle[]): SubArticle[] {
+  if (!items?.length) return [];
+  return items.map((item) => ({
+    eid: item.eid,
+    type: item.type,
+    num: item.num,
+    label: item.label,
+    chapeau: item.chapeau,
+    text: item.text,
+    items: mapSubArticles(item.items)
+  }));
+}
+
+function mapFocus(focus?: ApiFocus): SubArticleFocus | undefined {
+  if (!focus) return undefined;
+  return { eid: focus.eid, chapeau: focus.chapeau, text: focus.text };
 }
 
 function buildPayloads(result: ApiCitationResult): Record<string, ArticlePreviewPayload> | undefined {
-  if (!result.payloads) {
-    return undefined;
-  }
+  if (!result.payloads) return undefined;
 
-  const entries = Object.entries(result.payloads).map(([language, payload]) => [
+  const entries = Object.entries(result.payloads).map(([language, p]) => [
     language,
     {
       language,
-      title: payload.law_title ?? result.law_title ?? 'Swiss federal law',
-      articleLabel: payload.article_number ? `Art. ${payload.article_number}` : 'Article',
-      html: `<p>${payload.full_text ?? payload.excerpt ?? 'No article text returned.'}</p>`,
-      sourceUrl: payload.fedlex_url ?? ''
+      title: p.law_title ?? result.law_title ?? 'Swiss federal law',
+      articleLabel: p.article_number ?? 'Article',
+      articleTitle: p.article_title,
+      hierarchyLabel: p.hierarchy_label,
+      excerpt: p.excerpt ?? '',
+      fullText: p.full_text ?? p.excerpt ?? '',
+      sourceUrl: p.fedlex_url ?? '',
+      subArticles: mapSubArticles(p.sub_articles),
+      focus: mapFocus(p.focus)
     } satisfies ArticlePreviewPayload
   ]);
 
   return Object.fromEntries(entries);
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 export async function resolveCitation(citation: ParsedCitation): Promise<ResolvedCitation> {
   const cacheKey = buildCanonicalKey(citation);
   const existing = cache.get(cacheKey);
-  if (existing) {
-    return existing;
-  }
+  if (existing) return existing;
 
   const promise = fetch(RESOLVE_ENDPOINT, {
     method: 'POST',
     signal: AbortSignal.timeout(5000),
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       citations: [
         {
           abbreviation: citation.abbreviation || undefined,
           article_number: citation.articleNumber,
-          sr_number: citation.srNumber || undefined
+          sr_number: citation.srNumber || undefined,
+          paragraph: citation.paragraph || undefined,
+          letter: citation.letter || undefined,
+          number: citation.number || undefined,
+          sentence: citation.sentence || undefined
         }
       ],
       languages: ['de', 'fr', 'it']
